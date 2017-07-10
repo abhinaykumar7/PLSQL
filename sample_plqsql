@@ -1,0 +1,179 @@
+CREATE OR REPLACE PROCEDURE "validate_sample1"
+    ( batchfilename IN varchar2,
+      accountid     IN      number,
+      msisdn        IN     number,
+      imsi          IN     number,
+	    ret_status    OUT number)
+
+IS
+  v_query_return                  varchar2(256);
+  v_query_return_imsi             number;
+  v_query_return_rbtac            number;
+  v_query_return_msisdn           number;
+  v_query_return_conn_status      varchar2(256);
+  v_status                        varchar2(256);
+  v_result                        varchar2(512);
+
+  v_msisdn number;
+  v_imsi   number;
+  v_accountid number;
+
+BEGIN
+
+     ret_status := 0;
+     v_accountid := accountid ;
+     v_msisdn := msisdn ;
+     v_imsi := imsi ;
+     v_query_return :=NULL;
+     v_query_return_imsi :=NULL;
+     v_query_return_rbtac :=NULL;
+     v_query_return_conn_status :=NULL;
+     v_status :='Validated';
+     v_result :=NULL;
+
+     begin
+
+
+          dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':Checking pairing status of MSISDN :' || v_msisdn || ':and accountid:' || v_accountid);
+
+         begin
+
+         SELECT 'X' into v_query_return FROM PS_RF_INST_PROD@CRM_PAYG_DB.H3GUK.COM A INNER JOIN PS_RFTINST_PROD@CRM_PAYG_DB.H3GUK.COM B ON
+         A.INST_PROD_ID = B.INST_PROD_ID AND A.SETID = B.SETID WHERE A.INST_PROD_STATUS <> 'DIS'
+         AND A.ASSETTAG = to_char(v_msisdn) AND B.RBTACCTNO =v_accountid;
+
+         -- Exception block
+
+           EXCEPTION
+                  WHEN NO_DATA_FOUND THEN
+                     dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':MSISDN and Account not found or not connected, no rows returned');
+                     dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':::Checking pairing of msisdn:' || v_imsi ||'and accountid:' || v_accountid);
+                     begin
+                          begin
+                               SELECT B.RBTACCTNO into v_query_return_rbtac FROM PS_RF_INST_PROD@CRM_PAYG_DB.H3GUK.COM A INNER JOIN
+                               PS_RFTINST_PROD@CRM_PAYG_DB.H3GUK.COM B ON A.INST_PROD_ID = B.INST_PROD_ID AND A.SETID = B.SETID
+                               WHERE A.ASSETTAG = to_char(v_msisdn);
+
+                               IF  v_query_return_rbtac != v_accountid
+                               THEN
+                                   v_status:='Rejected';
+                                   v_result:='9003 - MSISDN found to be paired with a different BAN in PeopleSoft';
+                                   dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':::MSISDN found to be paired with a different BAN in PeopleSoft:' || v_msisdn ||'and peoplesoft BAN:' || v_query_return_rbtac);
+                                   ret_status:=0;
+                                   ELSIF   v_query_return_rbtac is NULL
+                                   THEN
+                                       v_status:='Rejected';
+                                       v_result:='9004 - BAN or MSISDN not found in PeopleSoft';
+                                       dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':::MSISDN found PeopleSoft is null:' || v_msisdn );
+                                       ret_status:=0;
+                               END IF;
+
+                               EXCEPTION
+                               WHEN NO_DATA_FOUND THEN
+                                 v_status:='Rejected';
+                                 v_result:='9999-Zero rows returned, while checking pairing of input MSISDN and accountid';
+                                 ret_status:=0;
+                                 dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||'::::Zero rows returned, while getting RBTAC for MSISDN');
+
+                           end;
+                           
+                        begin
+                             IF v_status != 'Rejected'
+                             THEN
+                                 dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':::::Checking pairing status of msisdn:' || v_imsi ||'and accountid:' || v_accountid);
+
+                                 SELECT a.INST_PROD_STATUS into v_query_return_conn_status FROM PS_RF_INST_PROD@CRM_PAYG_DB.H3GUK.COM A
+                                 INNER JOIN PS_RFTINST_PROD@CRM_PAYG_DB.H3GUK.COM B ON A.INST_PROD_ID = B.INST_PROD_ID
+                                 AND A.SETID = B.SETID WHERE A.ASSETTAG = to_char(v_msisdn) AND B.RBTACCTNO = v_accountid;
+
+                                 IF  v_query_return_conn_status = 'DIS'
+                                 THEN
+                                     v_status:='Rejected';
+                                     v_result:='9001 - BAN and MSISDN are paired in PeopleSoft but are in a disconnected state';
+                                     dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||'::::Connection status between MSISDN :' || v_msisdn ||'and accountid:' || v_accountid ||'is DIS');
+                                     ret_status:=0;
+                                 ELSIF   v_query_return_conn_status is NULL
+                                 THEN
+                                 v_status:='Rejected';
+                                 v_result:='9006-BAN and MSISDN found in PeopleSoft but not paired-connection status is blank';
+                                 dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||'::::Connection status between MSISDN :' || v_msisdn ||'and accountid:' || v_accountid ||'is null');
+                                 ret_status:=0;
+                                 END IF;
+                             END IF;
+
+                             EXCEPTION
+                               WHEN NO_DATA_FOUND THEN
+                                 v_status:='Rejected';
+                                 v_result:='9999-Zero rows returned, while checking pairing of input MSISDN and accountid';
+                                 ret_status:=0;
+                                 dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||'::::Zero rows returned, while getting Connection status for ACCOUNTID and MSISDN');
+                        end;
+
+                   end;
+
+         end;
+
+          dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':1st query returned ....' || v_query_return);
+
+          IF v_query_return = 'X'
+          THEN
+
+              begin
+                   dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':MSISDN and Accountid are paired');
+                   dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||'::Checking if IMSI in PeopleSoft and NumerTrack are same:' || v_imsi);
+
+                   SELECT C.ATTRIBUTE_VALUE into v_query_return_imsi FROM PS_RF_INST_PROD@CRM_PAYG_DB.H3GUK.COM A JOIN PS_RF_INST_PROD@CRM_PAYG_DB.H3GUK.COM B
+                   ON A.SETID=B.SETID AND A.INST_PROD_ID=B.PARENT_INST_PRODID JOIN PS_RF_ATTR_INSP@CRM_PAYG_DB.H3GUK.COM C
+                   ON B.SETID=C.SETID AND B.INST_PROD_ID=C.INST_PROD_ID WHERE A.ASSETTAG = to_char(msisdn)
+                   AND A.INST_PROD_STATUS NOT IN ('PDI','DIS','CNC')
+                   AND B.INST_PROD_STATUS NOT IN ('PDI','DIS','CNC') AND C.ATTRIBUTE_ID='R1_UK_ITA_IMSI';
+
+
+                   IF  v_query_return_imsi = v_imsi
+                   THEN
+                       v_status :='Validated';
+                       dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':::IMSI assigned to given MSISDN is same in CRM and NumeriTrack');
+                       ret_status:=1;
+
+                   ELSE
+
+                       v_status:='Rejected';
+                       v_result:='9005 - IMSI assigned to given MSISDN is different between CRM and NumeriTrack';
+                       dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':::IMSI assigned to given MSISDN is different in CRM and NumeriTrack');
+                       ret_status:=0;
+
+
+                  END IF;
+
+
+                   EXCEPTION
+                       WHEN NO_DATA_FOUND THEN
+                                 v_status:='Rejected';
+                                 v_result:='9999-Zero rows returned, while fetching IMSI  for input MSISDN';
+                                 ret_status:=0;
+                                 dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||'::::Zero rows returned, while fetching IMSI  for input MSISDN');
+                end;
+
+               END IF;
+
+          IF v_status = 'Rejected'
+          THEN
+
+                  --update PAYG_DORMANCY_REQ_TRACKING
+                  dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||'Updating PAYG_DORMANCY_REQ_TRACKING for file:' ||batchfilename);
+                  dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':MSISDN:' ||v_msisdn ||':account:' || v_accountid);
+
+                  dbms_output.put_line('Status ..'||v_status||'..Result..'||v_result);
+                  update PAYG_DORMANCY_REQ_TRACKING set state = v_status, result = v_result
+                  where batch_filename = batchfilename and accountid =v_accountid and msisdn = v_msisdn;
+                  --select count(*) into ret_status from PAYG_DORMANCY_REQ_TRACKING where batch_filename = batchfilename and msisdn = v_msisdn and accountid = v_accountid;
+                   dbms_output.put_line('Number of rows updated ...'||SQL%ROWCOUNT);
+                   dbms_output.put_line(TO_CHAR(sysdate, 'Day fmMonth dd HH24:MI:SS yyyy')||':SQL Error code after update ...'|| SQLCODE);
+                   commit;
+                   ret_status:=0;
+         END IF;
+
+
+           end;
+
+END validate_sample1;
